@@ -1,0 +1,6 @@
+<launch>
+    <node pkg = "joy" name="joy" type="joy_node" args="_dev:=/dev/input/js0"/>
+    <node pkg="teleop_carla" type="teleop_node" name="teleop_node"/>
+    <node pkg="rqt_reconfigure" type="rqt_reconfigure" name="rqt_reconfigure"/>
+    <node pkg="rviz" type="rviz" name="rviz" args="-d /home/mad-carla/share/ras_demo.rviz"/>
+</launch>
