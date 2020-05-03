@@ -15,7 +15,7 @@ geometry_msgs
 nav_msgs
 joy
 dynamic_reconfigure
-carla_msgs
+# carla_msgs
 )
 
 ## Generate messages in the 'msg' folder
@@ -45,6 +45,6 @@ include_directories(
 ${catkin_INCLUDE_DIRS}
 )
 
-add_executable(teleop_node src/teleop.cpp)
-add_dependencies(teleop_node teleop_gencfg)
-target_link_libraries(teleop_node ${catkin_LIBRARIES})
+add_executable(teleop_carla_ff_node src/teleop_carla_ff.cpp)
+# add_dependencies(teleop_carla_ff_node teleop_gencfg)
+target_link_libraries(teleop_carla_ff_node ${catkin_LIBRARIES})
