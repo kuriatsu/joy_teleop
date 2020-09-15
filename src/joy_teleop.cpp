@@ -2,343 +2,339 @@
 #include <sensor_msgs/Joy.h>
 #include <geometry_msgs/Twist.h>
 #include <geometry_msgs/TwistStamped.h>
-#include <sound_play/sound_play.h>
-#include "swipe_obstacles/closest_obstacle.h"
-#include <dynamic_reconfigure/server.h>
-#include <teleop_study/teleop_studyConfig.h>
+#include <nav_msgs/Odometry.h>
+#include <carla_msgs/CarlaEgoVehicleControl.h>
 
 #include <cmath>
 
+#include <dynamic_reconfigure/server.h>
+#include <teleop_carla/teleopConfig.h>
+#include <g29_force_feedback/ForceFeedback.h>
 
-
-class YpTeleopStudy
+class Teleop
 {
-    private :
+private:
     ros::Subscriber sub_joy;
     ros::Subscriber sub_twist;
-    ros::Publisher pub_yp_cmd;
+    ros::Subscriber sub_odom;
+    ros::Publisher pub_twist;
+    ros::Publisher pub_vehicle_control;
+    ros::Publisher pub_ff;
 
-    geometry_msgs::Twist in_twist;
-    geometry_msgs::Twist twist;
-    int triger_frag;
-
-    float max_twist_speed;
-    float accel;
-    float accel_limit;
-    float brake;
-    float brake_limit;
     float pub_rate;
-    float dash = 0;
-    float base_speed = 0.5;
 
 
+    geometry_msgs::Twist m_autoware_twist;
+    // geometry_msgs::Twist joy_twist;
+    geometry_msgs::Twist m_current_twist;
+    carla_msgs::CarlaEgoVehicleControl m_vehicle_cmd;
+    float m_throttle;
+    float m_brake;
+    float m_manual_omega;
+    // float max_radius;
     ros::Timer timer;
-    bool rosbag_flag ;
-    bool mode;
 
-    // bool scenario_runner;
-    swipe_obstacles::closest_obstacle closest_obstacle;
-    ros::Time stoped_time;
-    bool closest_obstacle_is_new;
+    // dynamic_reconfigure params
+    float m_max_vel;
+    float m_max_wheel_angle;
+    float m_max_accel;
+    float m_max_decel;
+    float m_natural_decel;
+    int m_device_type;
+    int m_control_type;
+    bool m_autonomous_mode;
+    bool m_rosbag_flag;
+    bool m_back;
+    bool m_enable_ff;
 
-    dynamic_reconfigure::Server<teleop_study::teleop_studyConfig> server;
-    dynamic_reconfigure::Server<teleop_study::teleop_studyConfig>::CallbackType server_callback;
+    dynamic_reconfigure::Server<teleop_carla::teleopConfig> server;
+    dynamic_reconfigure::Server<teleop_carla::teleopConfig>::CallbackType server_callback;
+public:
+    Teleop();
 
-    public :
-    YpTeleopStudy();
-
-    private :
-    void joyCallback(const sensor_msgs::Joy &in_msg);
-    void twistCallback(const geometry_msgs::TwistStamped &in_msg);
+private:
+    void joyCallback(const sensor_msgs::Joy &in_joy);
+    void twistCallback(const geometry_msgs::TwistStamped &in_twist);
+    void odomCallback(const nav_msgs::Odometry &in_odom);
     void timerCallback(const ros::TimerEvent&);
-    void dynamicCfgCallback(teleop_study::teleop_studyConfig &config, uint32_t level);
+    void callbackDynamicReconfigure(teleop_carla::teleopConfig &config, uint32_t lebel);
+    void dynamicReconfigureUpdate();
+    float calcVelChange();
+    float calcOmega(float angular_vel);
 };
 
 
-YpTeleopStudy::YpTeleopStudy(): mode(false), triger_frag(0), /*scenario_runner(false),*/closest_obstacle_is_new(false), rosbag_flag(0), accel(0.0), brake(1.0)
+Teleop::Teleop(): m_throttle(0.0), m_brake(0.0), m_back(false), pub_rate(0.1)
 {
     ros::NodeHandle n;
-    twist.linear.x = 0.0;
-    twist.angular.z = 0.0;
 
-    sub_joy = n.subscribe("/joy", 1, &YpTeleopStudy::joyCallback, this);
-    sub_twist = n.subscribe("/twist_cmd", 1, &YpTeleopStudy::twistCallback, this);
-    pub_yp_cmd = n.advertise<geometry_msgs::Twist>("/carla/ego_vehicle/twist_cmd", 1);
-
-    server_callback = boost::bind(&YpTeleopStudy::dynamicCfgCallback, this, _1, _2);
+    server_callback = boost::bind(&Teleop::callbackDynamicReconfigure, this, _1, _2);
     server.setCallback(server_callback);
 
-    n.getParam("autonomous_mode", mode);
-
+    sub_joy = n.subscribe("/joy", 1, &Teleop::joyCallback, this);
+    sub_twist = n.subscribe("/twist_cmd", 1, &Teleop::twistCallback, this);
+    sub_odom = n.subscribe("/carla/ego_vehicle/odometry", 1, &Teleop::odomCallback, this);
+    pub_ff = n.advertise<g29_force_feedback::ForceFeedback>("/ff_target", 1);
+    pub_twist = n.advertise<geometry_msgs::Twist>("/carla/ego_vehicle/twist_cmd", 1);
+    pub_vehicle_control = n.advertise<carla_msgs::CarlaEgoVehicleControl>("/carla/ego_vehicle/vehicle_control_cmd", 1);
     ros::Duration(1).sleep();
-    timer = n.createTimer(ros::Duration(pub_rate), &YpTeleopStudy::timerCallback, this);
+    timer = n.createTimer(ros::Duration(pub_rate), &Teleop::timerCallback, this);
 }
 
 
-void YpTeleopStudy::dynamicCfgCallback(teleop_study::teleop_studyConfig &config, uint32_t level)
+void Teleop::callbackDynamicReconfigure(teleop_carla::teleopConfig &config, uint32_t lebel)
 {
-    base_speed = config.base_speed;
-    dash = config.dash;
-    max_twist_speed = config.max_twist_speed;
-    accel_limit = config.acceleration_limit;
-    brake_limit = config.deceleration_limit;
-    pub_rate = config.pub_rate;
-}
+    m_max_vel = config.max_speed / 3.6;
+    m_max_wheel_angle = config.max_steer;
+    m_max_accel = config.acceleration_coefficient * 9.8 * pub_rate * 3.6;
+    m_max_decel = config.deceleration_coefficient * 9.8 * pub_rate  * 3.6;
+    m_natural_decel = config.natural_deceleration_coefficient * 9.8 * pub_rate  * 3.6;
+    m_autonomous_mode = config.autonomous_mode?true:false;
+    m_rosbag_flag = config.rosbag_flag?true:false;
+    m_device_type = config.controller;
+    m_control_type = config.control_type;
+    m_enable_ff = config.enable_ff?true:false;
 
-
-void YpTeleopStudy::timerCallback(const ros::TimerEvent&)
-{
-    float speed_change;
-    float current_twist_speed, aim_twist_speed;
-
-    // std::cout << "current_mode = " << mode << std::endl;
-    // std::cout << "current_vel = " << twist.linear.x << std::endl;
-    // std::cout << "current_vel = " << twist.linear.x << std::endl;
-    // std::cout << "accel = " << accel << "brake = " << brake << std::endl;
-
-    current_twist_speed = twist.linear.x;
-
-    // if(accel != 0 && brake != 0)
-    // {
-    //     aim_twist_speed = in_twist.linear.x;
-    //     std::cout << "aim_vel = " << aim_twist_speed << std::endl;
-    //
-    // }
-    // else
-    // {
-    //     aim_twist_speed = current_twist_speed
-    //     + accel * 0.25 * pub_rate * ((max_twist_speed - current_twist_speed) / max_twist_speed)
-    //     - brake * 0.7 * pub_rate * (0.1 + (max_twist_speed - current_twist_speed) / max_twist_speed);
-    //
-    //     aim_twist_speed = (aim_twist_speed < max_twist_speed) ? aim_twist_speed : max_twist_speed;
-    //     aim_twist_speed = (aim_twist_speed > 0.0) ? aim_twist_speed : 0.0;
-    // }
-    ROS_INFO("in_twist %f", in_twist.linear.x);
-
-
-    if (in_twist.linear.x >= 0.0)
+    if (m_enable_ff && m_autonomous_mode)
     {
-        aim_twist_speed = (in_twist.linear.x + accel) * brake;
-    }else
-    {
-        aim_twist_speed = (in_twist.linear.x - accel) * brake;
+        ros::param::set("/mode", 0);
     }
-
-    aim_twist_speed = (aim_twist_speed < max_twist_speed) ? aim_twist_speed : max_twist_speed;
-    aim_twist_speed = (aim_twist_speed > -max_twist_speed) ? aim_twist_speed : -max_twist_speed;
-
-    ROS_INFO("aim_twist1 %f", aim_twist_speed);
-
-    // automode
-    if(mode)
+    else if (m_enable_ff && !m_autonomous_mode)
     {
-        speed_change = aim_twist_speed - current_twist_speed;
-        if(speed_change > accel_limit * pub_rate)
+        ros::param::set("/mode", 1);
+    }
+}
+
+
+void Teleop::dynamicReconfigureUpdate()
+{
+    teleop_carla::teleopConfig config;
+    config.max_speed = m_max_vel * 3.6;
+    config.max_steer = m_max_wheel_angle;
+    config.acceleration_coefficient = m_max_accel / (9.8 * pub_rate * 3.6);
+    config.deceleration_coefficient = m_max_decel / (9.8 * pub_rate  * 3.6);
+    config.natural_deceleration_coefficient = m_natural_decel / (9.8 * pub_rate  * 3.6);
+    config.autonomous_mode = m_autonomous_mode;
+    config.rosbag_flag = m_rosbag_flag;
+    config.controller = m_device_type;
+    config.control_type = m_control_type;
+    config.enable_ff = m_enable_ff;
+
+    server.updateConfig(config);
+}
+
+
+void Teleop::joyCallback(const sensor_msgs::Joy &in_joy)
+{
+    if (m_device_type == 0)
+    {
+        m_throttle = (1.0 - in_joy.axes[5]) * 0.5;
+        m_brake = (1.0 - in_joy.axes[2]) * 0.5;
+        m_manual_omega = -m_current_twist.linear.x * tan(m_max_wheel_angle * in_joy.axes[0] * M_PI / 180) / 3.0;
+        // m_manual_omega = -m_current_twist.linear.x * tan((90.0 - m_max_wheel_angle) * in_joy.axes[0] * M_PI / 180) / 3.0;
+
+        if(in_joy.buttons[1] && fabs(m_current_twist.linear.x) < 2.0)
         {
-            aim_twist_speed = current_twist_speed + accel_limit * pub_rate * ((max_twist_speed - current_twist_speed) / max_twist_speed);
-        }
-        // if(speed_change < -brake_limit * pub_rate)
-        // {
-            // aim_twist_speed = current_twist_speed - brake_limit * pub_rate * (0.1 + (max_twist_speed - current_twist_speed) / max_twist_speed);
-        // }
-
-        aim_twist_speed = (aim_twist_speed < max_twist_speed) ? aim_twist_speed : max_twist_speed;
-        aim_twist_speed = (aim_twist_speed > 0.0) ? aim_twist_speed : 0.0;
-    }
-
-    // aim_twist_speed = (aim_twist_speed < max_twist_speed) ? aim_twist_speed : max_twist_speed;
-    // aim_twist_speed = (aim_twist_speed > 0.0) ? aim_twist_speed : 0.0;
-    ROS_INFO("aim_twist2 %f", aim_twist_speed);
-
-    twist.linear.x = aim_twist_speed;
-    twist.angular.z = in_twist.angular.z;
-    // std::cout << "aim_twist=" << aim_twist_speed << std::endl;
-    // std::cout << "current_twist=" << current_twist_speed << std::endl;
-    // std::cout << "twist=" << twist.linear.x << std::endl;
-    pub_yp_cmd.publish(twist);
-}
-
-
-void YpTeleopStudy::closestObstacleCallback(const swipe_obstacles::closest_obstacle &in_msg)
-{
-    // if closest_obstacle id is updated
-    if(closest_obstacle.id != in_msg.id)
-    {
-        closest_obstacle_is_new = true;
-        std::cout << "new obstacle comming" << std::endl;
-    }
-    closest_obstacle = in_msg;
-}
-
-
-void YpTeleopStudy::twistCallback(const geometry_msgs::TwistStamped &in_msg)
-{
-    if(mode)
-    {
-        in_twist.linear.x = in_msg.twist.linear.x;
-        in_twist.angular.z = in_msg.twist.angular.z;
-
-        // if(scenario_runner){}
-        if(closest_obstacle.brief_stop && closest_obstacle.distance < closest_obstacle.stop_distance && closest_obstacle_is_new)
-        {
-            stoped_time = ros::Time::now();
-            std::cout << "timer start: " << stoped_time << std::endl;
-            closest_obstacle_is_new = false;
+            m_back = !m_back;
+            m_autonomous_mode = false;
         }
 
-        if(ros::Time::now() - stoped_time < ros::Duration(closest_obstacle.stop_time))
+        if(in_joy.buttons[2])
         {
-            std::cout << "stopping time: " << ros::Time::now() - stoped_time << std::endl;
-            in_twist.linear.x = 0.0;
+            m_autonomous_mode = !m_autonomous_mode;
+            dynamicReconfigureUpdate();
+        }
+
+        // START [7]
+        if (in_joy.buttons[7])
+        {
+            m_rosbag_flag = !m_rosbag_flag;
+            dynamicReconfigureUpdate();
+            if(!m_rosbag_flag)
+            {
+                ROS_INFO("bag_record_on");
+                // system("bash ~/Program/Ros/master_study_ws/src/teleop_study/src/bag_recorder.sh &");
+            }else
+            {
+                ROS_INFO("bag_record_off");
+                // system("bash ~/Program/Ros/master_study_ws/src/teleop_study/src/bag_stopper.sh &");
+            }
+        }
+    }
+    else if(m_device_type == 1)
+    {
+        m_throttle = (1.0 + in_joy.axes[2]) * 0.5;
+        m_brake = (1.0 + in_joy.axes[3]) * 0.5;
+        m_manual_omega = -m_current_twist.linear.x * tan(m_max_wheel_angle * in_joy.axes[0] * M_PI / 180) / 3.0;
+        // m_manual_omega = -m_current_twist.linear.x * tan((90.0 - m_max_wheel_angle) * in_joy.axes[0] * M_PI / 180) / 3.0;
+
+        if(in_joy.buttons[3])
+        {
+            m_autonomous_mode = !m_autonomous_mode;
+            dynamicReconfigureUpdate();
+        }
+
+        if(in_joy.buttons[2] && !m_autonomous_mode)
+        {
+            m_back = !m_back;
+            m_autonomous_mode = false;
+        }
+        // START [7]
+        if (in_joy.buttons[1])
+        {
+            m_rosbag_flag = !m_rosbag_flag;
+            dynamicReconfigureUpdate();
+            if(!m_rosbag_flag)
+            {
+                ROS_INFO("bag_record_on");
+                // system("bash ~/Program/Ros/master_study_ws/src/teleop_study/src/bag_recorder.sh &");
+            }else
+            {
+                ROS_INFO("bag_record_off");
+                // system("bash ~/Program/Ros/master_study_ws/src/teleop_study/src/bag_stopper.sh &");
+            }
+        }
+    }
+    m_vehicle_cmd.header.stamp = ros::Time::now();
+    m_vehicle_cmd.throttle = m_throttle;
+    m_vehicle_cmd.steer = -in_joy.axes[0];
+    m_vehicle_cmd.brake = m_brake;
+    m_vehicle_cmd.reverse = m_back;
+    // m_vehicle_cmd.gear = 4;
+    // m_vehicle_cmd.gear = int(m_vehicle_cmd.manual_gear_shift + in_joy.buttons[4] - in_joy.buttons[5]) % 4 + 1;
+}
+
+
+void Teleop::twistCallback(const geometry_msgs::TwistStamped &in_twist)
+{
+    if (m_autonomous_mode)
+    {
+        m_autoware_twist = in_twist.twist;
+        m_autoware_twist.angular.z = -in_twist.twist.angular.z;
+    }
+}
+
+
+void Teleop::odomCallback(const nav_msgs::Odometry &in_odom)
+{
+    m_current_twist = in_odom.twist.twist;
+}
+
+
+void Teleop::timerCallback(const ros::TimerEvent&)
+{
+    geometry_msgs::Twist out_twist;
+
+    if (m_autonomous_mode || m_control_type == 0)
+    {
+        float vel_change = calcVelChange();
+
+        if (m_back)
+            vel_change *= -1;
+
+        out_twist.linear.x = m_current_twist.linear.x + vel_change;
+
+        if ((m_back && out_twist.linear.x > 0.0) || (!m_back && out_twist.linear.x < 0.0))
+        {
+            std::cout << "sign changed unexpectedly" << m_back << m_control_type << out_twist.linear.x << std::endl;
+            out_twist.linear.x = 0.0;
+        }
+
+        if ((m_enable_ff && m_autonomous_mode) || !m_autonomous_mode)
+        {
+            out_twist.angular.z = calcOmega(m_manual_omega);
         }
         else
         {
-            std::cout << stoped_time << std::endl;
-            std::cout << "stop_time is over time is:" << ros::Time::now() - stoped_time << std::endl;
+            out_twist.angular.z = calcOmega(m_autoware_twist.angular.z);
         }
+
+        pub_twist.publish(out_twist);
+        // m_autoware_twist.linear.x = 0.0;
+    }
+    else
+    {
+        pub_vehicle_control.publish(m_vehicle_cmd);
+        // pub_twist.publish(m_autoware_twist);
+    }
+
+    if (m_enable_ff)
+    {
+        g29_force_feedback::ForceFeedback ff;
+
+        if (m_autonomous_mode)
+        {
+            ff.angle = -out_twist.angular.z;
+            ff.force = 0.6;
+        }
+        else
+        {
+            ff.angle = 0.0;
+            ff.force = 0.3;
+        }
+
+        pub_ff.publish(ff);
+    }
+    else
+    {
+        g29_force_feedback::ForceFeedback ff;
+        // ff.angle = -out_twist.angular.z;
+        ff.force = 0.0;
+        pub_ff.publish(ff);
     }
 }
 
 
-void YpTeleopStudy::joyCallback(const sensor_msgs::Joy &in_msg)
+float Teleop::calcVelChange()
 {
-    double sec_interval;
+    float vel_change;
 
-    if(in_msg.axes[5] != -0.0) triger_frag = 1;
-    if(in_msg.axes[2] != -0.0) triger_frag = 2;
-
-    if(triger_frag < 1)
+    // when no pedal control
+    if (m_brake == 0.0 && m_throttle == 0.0 && !m_autonomous_mode)
     {
-        accel = 0.0;
-    }else
-    {
-        accel = (1.0 - in_msg.axes[5]) * 0.5;
+        return -m_natural_decel;
     }
-
-    if(triger_frag < 2)
+    else if (m_brake == 0.0 && m_throttle == 0.0 && m_autonomous_mode)
     {
-        brake = 0.0;
-    }else
-    {
-        brake = (1.0 + in_msg.axes[2]) * 0.5;
+        vel_change = m_autoware_twist.linear.x - m_current_twist.linear.x;
     }
-
-    ROS_INFO("accel %f", accel);
-    ROS_INFO("brake %f", brake);
-    // if(in_msg.axes[2] == 1.0)
-    // {
-    //     brake = 0.0;
-    // }
-    // else
-    // {
-    //     brake = (1.0 + in_msg.axes[2]) * 0.5;
-    // }
-
-    //A button [0]
-    if (in_msg.buttons[0])
+    // when manual override
+    else
     {
-        sc.playWave("/usr/share/sounds/robot_sounds/jump.wav");
-        // if(scenario_runner)
-        // {
-        //     sc.playWave("/usr/share/sounds/robot_sounds/mini_jump.wav");
-        // }
-        // else
-        // {
-        // sc.playWave("/usr/share/sounds/robot_sounds/jump.wav");
-        // }
+        vel_change = m_throttle * m_max_accel - m_brake * m_max_decel;
     }
-    // B button [1]
-    // if (in_msg.buttons[1])
-    // {
-    //     if(scenario_runner)
-    //     {
-    //         scenario_runner = false;
-    //     }
-    //     else if(!scenario_runner)
-    //     {
-    //         scenario_runner = true;
-    //         ROS_INFO("scenario mode\n");
-    //     }
-    // }
-    // X button [2]
-    if (in_msg.buttons[2])
+    // cut velocity change with threshold
+    if (vel_change < -m_max_decel || m_max_accel < vel_change)
     {
-        if(mode)
-        {
-            mode = false;
-            sc.playWave("/usr/share/sounds/robot_sounds/pipe.wav");
-            ROS_INFO("manual mode\n");
-        }else if(!mode)
-        {
-            mode = true;
-            sc.playWave("/usr/share/sounds/robot_sounds/powerup.wav");
-            ROS_INFO("autonomous mode\n");
-        }
+        std::cout << "velchange over max" << std::endl;
+        return (vel_change > 0.0) ? m_max_accel : -m_max_decel;
     }
-
-    // Y button [3]
-    if (in_msg.buttons[3])
+    if (fabs(m_current_twist.linear.x) > m_max_vel)
     {
-        sc.playWave("/usr/share/sounds/robot_sounds/coin.wav");
+        std::cout << "vel is over max" << std::endl;
+        return 0.0;
     }
-
-    if(!mode)
-    {
-        in_twist.linear.x = base_speed * in_msg.axes[4];
-        in_twist.angular.z = 0.5 * in_msg.axes[0] * in_msg.axes[4];
-        // current_twist_speed = twist.linear.x;
-    }
-
-    // LB [4]
-    if (in_msg.buttons[4])
-    {
-        sc.playWave("/usr/share/sounds/robot_sounds/airship_moves.wav");
-        in_twist.linear.x += (in_twist.linear.x > 0.0) ? dash : -dash;
-    }
-    // RB [5]
-    if (in_msg.buttons[5])
-    {
-        sc.playWave("/usr/share/sounds/robot_sounds/airship_moves.wav");
-        in_twist.linear.x += (in_twist.linear.x > 0.0) ? dash : -dash;
-    }
-
-    // START [7]
-    if (in_msg.buttons[7])
-    {
-        if(!rosbag_flag)
-        {
-            ROS_INFO("bag_record_on");
-            sc.playWave("/usr/share/sounds/robot_sounds/new_world.wav");
-            system("bash ~/Program/Ros/master_study_ws/src/teleop_study/src/bag_recorder.sh &");
-            rosbag_flag = true;
-        }else if(rosbag_flag)
-        {
-            ROS_INFO("bag_record_off");
-            sc.playWave("/usr/share/sounds/robot_sounds/break_brick_block.wav");
-            system("bash ~/Program/Ros/master_study_ws/src/teleop_study/src/bag_stopper.sh &");
-            rosbag_flag = false;
-        }
-    }
-    // BACK [6]
-    // Logicoool [8]
-    // left joy click [9]
-    // right joy click [10]
-
-    ROS_INFO("joy_in_twist %f", in_twist.linear.x);
-
+    return vel_change;
 }
 
 
-int main(int argc, char **argv) {
+float Teleop::calcOmega(const float angular_vel)
+{
+    float max_angular = fabs(m_current_twist.linear.x) * tan(m_max_wheel_angle * M_PI / 180) / 3.0;
+    std::cout <<  m_current_twist.linear.x << " : " << angular_vel << " : " << max_angular << std::endl;
+    return (fabs(angular_vel) < max_angular) ?  angular_vel : ( angular_vel < 0.0) ? -max_angular : max_angular;
+    // return autonomous_omega;
+    // if (m_autonomous_mode)
+    //     return (fabs(autonomous_omega) < max_angular) ? autonomous_omega : (autonomous_omega < 0.0) ? max_angular : -max_angular;
+    // else
+    //     return (fabs(manual_omega) < max_angular) ? manual_omega : (manual_omega < 0.0) ? -max_angular : max_angular;
+}
 
-    ros::init(argc, argv, "yp_teleop_study0");
 
-
-
-
-    YpTeleopStudy yp_teleop;
-
-
+int main(int argc, char **argv)
+{
+    ros::init(argc, argv, "teleop_node");
+    Teleop teleop;
     ros::spin();
-    return (0);
+    return(0);
 }
