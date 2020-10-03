@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.8.3)
-project(teleop_carla)
+project(joy_teleop)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
 add_compile_options(-std=c++11)
@@ -12,9 +12,9 @@ roscpp
 rospy
 std_msgs
 geometry_msgs
-nav_msgs
 joy
 dynamic_reconfigure
+g29_force_feedback
 # carla_msgs
 )
 
@@ -28,7 +28,7 @@ dynamic_reconfigure
 
 ## Generate dynamic reconfigure parameters in the 'cfg' folder
 generate_dynamic_reconfigure_options(
-cfg/teleop.cfg
+cfg/joy_teleop.cfg
 )
 
 catkin_package(
@@ -45,6 +45,8 @@ include_directories(
 ${catkin_INCLUDE_DIRS}
 )
 
-add_executable(teleop_carla_ff_node src/teleop_carla_ff.cpp)
-# add_dependencies(teleop_carla_ff_node teleop_gencfg)
-target_link_libraries(teleop_carla_ff_node ${catkin_LIBRARIES})
+
+add_executable(joy_teleop_node src/joy_teleop.cpp)
+
+add_dependencies(joy_teleop_node ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS} joy_teleop_gencfg)
+target_link_libraries(joy_teleop_node ${catkin_LIBRARIES})

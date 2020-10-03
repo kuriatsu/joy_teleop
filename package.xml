@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <package format="2">
-  <name>teleop_carla</name>
+  <name>joy_teleop</name>
   <version>0.0.0</version>
   <description>The teleop package</description>
 

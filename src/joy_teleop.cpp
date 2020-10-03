@@ -8,7 +8,7 @@
 #include <cmath>
 
 #include <dynamic_reconfigure/server.h>
-#include <teleop_carla/teleopConfig.h>
+#include <joy_teleop/joy_teleopConfig.h>
 #include <g29_force_feedback/ForceFeedback.h>
 
 class Teleop
@@ -47,8 +47,8 @@ private:
     bool m_back;
     bool m_enable_ff;
 
-    dynamic_reconfigure::Server<teleop_carla::teleopConfig> server;
-    dynamic_reconfigure::Server<teleop_carla::teleopConfig>::CallbackType server_callback;
+    dynamic_reconfigure::Server<joy_teleop::joy_teleopConfig> server;
+    dynamic_reconfigure::Server<joy_teleop::joy_teleopConfig>::CallbackType server_callback;
 public:
     Teleop();
 
@@ -57,7 +57,7 @@ private:
     void twistCallback(const geometry_msgs::TwistStamped &in_twist);
     void odomCallback(const nav_msgs::Odometry &in_odom);
     void timerCallback(const ros::TimerEvent&);
-    void callbackDynamicReconfigure(teleop_carla::teleopConfig &config, uint32_t lebel);
+    void callbackDynamicReconfigure(joy_teleop::joy_teleopConfig &config, uint32_t lebel);
     void dynamicReconfigureUpdate();
     float calcVelChange();
     float calcOmega(float angular_vel);
@@ -82,7 +82,7 @@ Teleop::Teleop(): m_throttle(0.0), m_brake(0.0), m_back(false), pub_rate(0.1)
 }
 
 
-void Teleop::callbackDynamicReconfigure(teleop_carla::teleopConfig &config, uint32_t lebel)
+void Teleop::callbackDynamicReconfigure(joy_teleop::joy_teleopConfig &config, uint32_t lebel)
 {
     m_max_vel = config.max_speed / 3.6;
     m_max_wheel_angle = config.max_steer;
@@ -108,7 +108,7 @@ void Teleop::callbackDynamicReconfigure(teleop_carla::teleopConfig &config, uint
 
 void Teleop::dynamicReconfigureUpdate()
 {
-    teleop_carla::teleopConfig config;
+    joy_teleop::joy_teleopConfig config;
     config.max_speed = m_max_vel * 3.6;
     config.max_steer = m_max_wheel_angle;
     config.acceleration_coefficient = m_max_accel / (9.8 * pub_rate * 3.6);
@@ -265,12 +265,14 @@ void Teleop::timerCallback(const ros::TimerEvent&)
         if (m_autonomous_mode)
         {
             ff.angle = -out_twist.angular.z;
-            ff.force = 0.6;
+            ff.force = 0.0;
+            ff.pid_mode = true;
         }
         else
         {
             ff.angle = 0.0;
-            ff.force = 0.3;
+            ff.force = 0.25;
+            ff.pid_mode = false;
         }
 
         pub_ff.publish(ff);
@@ -333,7 +335,7 @@ float Teleop::calcOmega(const float angular_vel)
 
 int main(int argc, char **argv)
 {
-    ros::init(argc, argv, "teleop_node");
+    ros::init(argc, argv, "joy_teleop_node");
     Teleop teleop;
     ros::spin();
     return(0);
