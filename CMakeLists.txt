@@ -15,7 +15,7 @@ geometry_msgs
 joy
 dynamic_reconfigure
 g29_force_feedback
-# carla_msgs
+carla_msgs
 )
 
 ## Generate messages in the 'msg' folder
