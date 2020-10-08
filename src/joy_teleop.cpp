@@ -240,6 +240,10 @@ void Teleop::timerCallback(const ros::TimerEvent&)
         {
             final_cmd.steer = m_joy_cmd.steer;
         }
+
+        final_cmd.throttle = std::max(m_joy_cmd.throttle, m_autoware_cmd.throttle);
+        final_cmd.brake = std::max(m_joy_cmd.brake, m_autoware_cmd.brake);
+        
     }
     else
     {
