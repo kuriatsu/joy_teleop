@@ -172,18 +172,18 @@ void Teleop::joyCallback(const sensor_msgs::Joy &in_joy)
         }
 
         // START [7]
-        if (in_joy.buttons[1])
+        if (in_joy.buttons[24])
         {
             m_rosbag_flag = !m_rosbag_flag;
             dynamicReconfigureUpdate();
             if(!m_rosbag_flag)
             {
                 ROS_INFO("bag_record_on");
-                // system("bash ~/Program/Ros/master_study_ws/src/teleop_study/src/bag_recorder.sh &");
+                system("bash /home/kuriatsu/Source/catkin_ws/src/joy-teleop/src/bag_recorder.sh &");
             }else
             {
                 ROS_INFO("bag_record_off");
-                // system("bash ~/Program/Ros/master_study_ws/src/teleop_study/src/bag_stopper.sh &");
+                system("bash /home/kuriatsu/Source/catkin_ws/src/joy-teleop/src/bag_stopper.sh &");
             }
         }
     }
@@ -243,7 +243,7 @@ void Teleop::timerCallback(const ros::TimerEvent&)
 
         final_cmd.throttle = std::max(m_joy_cmd.throttle, m_autoware_cmd.throttle);
         final_cmd.brake = std::max(m_joy_cmd.brake, m_autoware_cmd.brake);
-        
+
     }
     else
     {
