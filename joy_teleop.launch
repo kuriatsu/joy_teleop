@@ -2,7 +2,7 @@
     <rosparam command="load" file="$(find g29_force_feedback)/g29_force_feedback.yaml" />
 
     <node pkg = "joy" name="joy" type="joy_node" args="_dev:=/dev/input/js1"/>
-    <node pkg="joy_teleop" type="joy_teleop_node" name="joy_teleop"/>
+    <node pkg="joy_teleop" type="joy_teleop_node" name="joy_teleop" output="screen"/>
     <node pkg="g29_force_feedback" type="g29_force_feedback_node" name="ff_node"/>
     <node pkg="rqt_reconfigure" type="rqt_reconfigure" name="rqt_reconfigure"/>
     <!-- <node pkg="rviz" type="rviz" name="rviz" args="-d /home/mad-carla/share/rviz_wall_jskbox.rviz"/> -->

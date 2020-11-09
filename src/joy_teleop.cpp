@@ -17,7 +17,7 @@ class Teleop
 private:
     ros::Subscriber sub_joy;
     ros::Subscriber sub_fake_control;
-    ros::Subscriber sub_autoware_control;
+    ros::Subscriber sub_autoware_cmd;
     ros::Subscriber sub_current_vel;
     ros::Publisher pub_vehicle_control_cmd;
     ros::Publisher pub_ff;
@@ -25,8 +25,8 @@ private:
     float m_pub_rate;
     ros::Timer timer;
 
-    carla_msgs::CarlaEgoVehicleControl m_fake_control;
-    carla_msgs::CarlaEgoVehicleControl m_autoware_control;
+    // carla_msgs::CarlaEgoVehicleControl m_fake_control;
+    carla_msgs::CarlaEgoVehicleControl m_autoware_cmd;
     // geometry_msgs::Twist joy_twist;
     geometry_msgs::Twist m_current_twist;
     carla_msgs::CarlaEgoVehicleControl m_joy_cmd;
@@ -34,17 +34,17 @@ private:
     bool m_gear_up;
     bool m_gear_down;
     // float max_radius;
-    double m_accel_Kp = 2.0;
-    double m_accel_Ki = 0.0;
-    double m_accel_Kd = 2.0;
-    double m_brake_Kp = 2.0;
+    double m_accel_Kp = 0.08;
+    double m_accel_Ki = 0.01;
+    double m_accel_Kd = 0.05;
+    double m_brake_Kp = 0.1;
     double m_brake_Ki = 0.0;
-    double m_brake_Kd = 2.0;
-    double m_wheel_base = 2.0;
+    double m_brake_Kd = 0.1;
+    double m_wheel_base = 2.7;
 
     // dynamic_reconfigure params
     dynamic_reconfigure::Server<joy_teleop::joy_teleopConfig> server;
-    dynamic_reconfigure::Server<joy_teleop::joy_teleopConfig>::CallbackType server_callback
+    dynamic_reconfigure::Server<joy_teleop::joy_teleopConfig>::CallbackType server_callback;
     int m_device_type;
     int m_input;
     bool m_autonomous_mode;
@@ -57,7 +57,7 @@ public:
 private:
     void joyCallback(const sensor_msgs::Joy &in_joy);
     void fakeControlCb(const carla_msgs::CarlaEgoVehicleControl &in_cmd);
-    void autowareControlCb(const autoware_msgs::VehicleCmd &in_twist);
+    void autowareCmdCb(const autoware_msgs::VehicleCmd &in_twist);
     void currentVelCb(const geometry_msgs::TwistStamped &in_twist);
     void timerCallback(const ros::TimerEvent&);
     void callbackDynamicReconfigure(joy_teleop::joy_teleopConfig &config, uint32_t lebel);
@@ -77,6 +77,7 @@ Teleop::Teleop(): m_pub_rate(0.1)
     sub_joy = n.subscribe("/joy", 1, &Teleop::joyCallback, this);
     sub_fake_control = n.subscribe("/fake_control_cmd", 1, &Teleop::fakeControlCb, this);
     sub_current_vel = n.subscribe("/current_twist", 1, &Teleop::currentVelCb, this);
+    sub_autoware_cmd = n.subscribe("/vehicle_cmd", 1, &Teleop::autowareCmdCb, this);
     pub_ff = n.advertise<g29_force_feedback::ForceFeedback>("/ff_target", 1);
     pub_vehicle_control_cmd = n.advertise<carla_msgs::CarlaEgoVehicleControl>("/carla/ego_vehicle/vehicle_control_cmd", 1);
     ros::Duration(1).sleep();
@@ -206,7 +207,7 @@ void Teleop::currentVelCb(const geometry_msgs::TwistStamped &in_twist)
 {
     if (m_input == 1)
     {
-        m_current_twist = in_twist.twist.twist;
+        m_current_twist = in_twist.twist;
     }
 }
 
@@ -221,24 +222,25 @@ void Teleop::autowareCmdCb(const autoware_msgs::VehicleCmd &in_cmd)
 {
     if (m_input == 1) return;
 
-    static double integral=0.0, proportional = 0.0;
-    double differential, buf_differential, result, radius;
+    static double integral=0.0, proportional = 0.0, differential = 0.0;
+    double buf_proportional, buf_differential, result, radius;
     // carla_msgs::CarlaEgoVehicleControl calcurated_cmd;
 
+    buf_proportional = proportional;
     buf_differential = differential;
-    differential = in_cmd.twist_cmd.twist.linear.x - m_current_twist.linear.x;
-    proportional =  differential - buf_differential;
-
-    if((buf_differential >0.0 && differential <0.0) || (buf_differential <0.0 && differential >0.0))
+    proportional = in_cmd.twist_cmd.twist.linear.x - m_current_twist.linear.x;
+    differential =  proportional - buf_proportional;
+    std::cout << proportional << ", " << differential << ", " << integral << std::endl;
+    if((buf_proportional > 0.0 && proportional < 0.0) || (buf_proportional < 0.0 && proportional >0.0))
     {
         integral = 0.0;
     }
     else
     {
-        integral += differential;
+        integral += proportional;
     }
 
-    if (differential > 0.0)
+    if (proportional > 0.0)
     {
         m_autoware_cmd.throttle = fabs(m_accel_Kp * proportional + m_accel_Ki * integral + m_accel_Kd * differential);
         m_autoware_cmd.brake = 0.0;
@@ -249,15 +251,19 @@ void Teleop::autowareCmdCb(const autoware_msgs::VehicleCmd &in_cmd)
         m_autoware_cmd.throttle = 0.0;
     }
 
-    if (in_cmd.twist.angular.z == 0.0 || m_current_twist.twist.linear.x == 0.0)
-    {
-        m_autoware_cmd.steer = 0.0;
-    }
-    else
-    {
-        radius = m_current_twist.twist.linear.x / in_cmd.twist.angular.z;
-        m_autoware_cmd.steer = std::atan(m_wheel_base / radius);
-    }
+    radius = in_cmd.twist_cmd.twist.linear.x / in_cmd.twist_cmd.twist.angular.z;
+    // radius = m_current_twist.linear.x / in_cmd.twist_cmd.twist.angular.z;
+    m_autoware_cmd.steer = -std::atan(m_wheel_base / radius);
+    // if (in_cmd.twist_cmd.twist.angular.z == 0.0 || m_current_twist.linear.x == 0.0)
+    // {
+    //     m_autoware_cmd.steer = 0.0;
+    //     std::cout << "twist or angular is 0" << std::endl;
+    // }
+    // else
+    // {
+    //     radius = m_current_twist.linear.x / in_cmd.twist_cmd.twist.angular.z;
+    //     m_autoware_cmd.steer = -std::atan(m_wheel_base / radius);
+    // }
 }
 
 
