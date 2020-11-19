@@ -34,12 +34,12 @@ private:
     bool m_gear_up;
     bool m_gear_down;
     // float max_radius;
-    double m_accel_Kp = 0.08;
+    double m_accel_Kp = 0.01;
     double m_accel_Ki = 0.01;
-    double m_accel_Kd = 0.05;
-    double m_brake_Kp = 0.1;
+    double m_accel_Kd = 0.03;
+    double m_brake_Kp = 0.01;
     double m_brake_Ki = 0.0;
-    double m_brake_Kd = 0.1;
+    double m_brake_Kd = 0.01;
     double m_wheel_base = 2.7;
 
     // dynamic_reconfigure params
@@ -76,7 +76,7 @@ Teleop::Teleop(): m_pub_rate(0.1)
 
     sub_joy = n.subscribe("/joy", 1, &Teleop::joyCallback, this);
     sub_fake_control = n.subscribe("/fake_control_cmd", 1, &Teleop::fakeControlCb, this);
-    sub_current_vel = n.subscribe("/current_twist", 1, &Teleop::currentVelCb, this);
+    sub_current_vel = n.subscribe("/current_velocity", 1, &Teleop::currentVelCb, this);
     sub_autoware_cmd = n.subscribe("/vehicle_cmd", 1, &Teleop::autowareCmdCb, this);
     pub_ff = n.advertise<g29_force_feedback::ForceFeedback>("/ff_target", 1);
     pub_vehicle_control_cmd = n.advertise<carla_msgs::CarlaEgoVehicleControl>("/carla/ego_vehicle/vehicle_control_cmd", 1);
@@ -205,7 +205,7 @@ void Teleop::joyCallback(const sensor_msgs::Joy &in_joy)
 
 void Teleop::currentVelCb(const geometry_msgs::TwistStamped &in_twist)
 {
-    if (m_input == 1)
+    if (m_input == 0)
     {
         m_current_twist = in_twist.twist;
     }
@@ -230,7 +230,7 @@ void Teleop::autowareCmdCb(const autoware_msgs::VehicleCmd &in_cmd)
     buf_differential = differential;
     proportional = in_cmd.twist_cmd.twist.linear.x - m_current_twist.linear.x;
     differential =  proportional - buf_proportional;
-    std::cout << proportional << ", " << differential << ", " << integral << std::endl;
+    std::cout <<m_current_twist.linear.x << ", " << proportional << ", " << differential << ", " << integral << std::endl;
     if((buf_proportional > 0.0 && proportional < 0.0) || (buf_proportional < 0.0 && proportional >0.0))
     {
         integral = 0.0;
@@ -247,7 +247,7 @@ void Teleop::autowareCmdCb(const autoware_msgs::VehicleCmd &in_cmd)
     }
     else
     {
-        m_autoware_cmd.brake = -1 * fabs(m_brake_Kp * proportional + m_brake_Ki * integral + m_brake_Kd * differential);
+        m_autoware_cmd.brake = fabs(m_brake_Kp * proportional + m_brake_Ki * integral + m_brake_Kd * differential);
         m_autoware_cmd.throttle = 0.0;
     }
 
