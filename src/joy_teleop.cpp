@@ -112,6 +112,7 @@ void Teleop::dynamicReconfigureUpdate()
 
 void Teleop::joyCallback(const sensor_msgs::Joy &in_joy)
 {
+    static int last_reverse_button = 0, last_bug_button = 0, last_autonomous_button = 0;
     m_joy_cmd.header.stamp = ros::Time::now();
 
     if (m_device_type == 0)
@@ -170,22 +171,24 @@ void Teleop::joyCallback(const sensor_msgs::Joy &in_joy)
             std::cout << m_joy_cmd.gear << std::endl;
         }
 
-        if(in_joy.buttons[2])
+        if(in_joy.buttons[2] && !last_autonomous_button)
         {
             m_joy_cmd.reverse = !m_joy_cmd.reverse;
             m_autonomous_mode = false;
             dynamicReconfigureUpdate();
         }
+        last_reverse_button == in_joy.buttons[2];
 
-        if(in_joy.buttons[3])
+        if(in_joy.buttons[3] && !last_reverse_button)
         {
             m_autonomous_mode = !m_autonomous_mode;
             m_joy_cmd.reverse = false;
             dynamicReconfigureUpdate();
         }
+        last_autonomous_button == in_joy.buttons[3];
 
         // START [7]
-        if (in_joy.buttons[24])
+        if (in_joy.buttons[24] && !last_bug_button)
         {
             m_rosbag_flag = !m_rosbag_flag;
             dynamicReconfigureUpdate();
@@ -199,6 +202,7 @@ void Teleop::joyCallback(const sensor_msgs::Joy &in_joy)
                 system("bash /home/kuriatsu/Source/catkin_ws/src/joy-teleop/src/bag_stopper.sh &");
             }
         }
+        last_bug_button = in_joy.buttons[24];
     }
 }
 
