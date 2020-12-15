@@ -301,19 +301,28 @@ void Teleop::timerCallback(const ros::TimerEvent&)
         pub_ff.publish(ff);
     }
 
+    // calcurate the command which send to the vehicle
     if (m_autonomous_mode)
     {
         final_cmd = m_autoware_cmd;
 
+        // if force feedback enabled, use joy steer
         if (m_enable_ff)
         {
             final_cmd.steer = m_joy_cmd.steer;
         }
 
-        final_cmd.throttle = (m_joy_cmd.throttle != 0.0) ? m_joy_cmd.throttle : m_autoware_cmd.throttle;
-        // final_cmd.throttle = std::max(m_joy_cmd.throttle, m_autoware_cmd.throttle);
-        final_cmd.brake = std::max(m_joy_cmd.brake, m_autoware_cmd.brake);
-
+        // if overrided throttle... chose joy_cmd (only speed)
+        if (m_joy_cmd.throttle != 0.0 || m_joy_cmd.brake != 0.0)
+        {
+            final_cmd.throttle = m_joy_cmd.throttle;
+            final_cmd.brake = m_joy_cmd.brake;
+        }
+        else
+        {
+            final_cmd.throttle = m_autoware_cmd.throttle;
+            final_cmd.brake = m_autoware_cmd.brake;
+        }
     }
     else
     {
