@@ -14,7 +14,7 @@ std_msgs
 geometry_msgs
 joy
 dynamic_reconfigure
-g29_force_feedback
+ros_g29_force_feedback
 autoware_msgs
 carla_msgs
 )
